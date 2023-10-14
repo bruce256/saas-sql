@@ -2,6 +2,17 @@ package com.bruce.saas.sql.mybatis;
 
 
 import lombok.extern.slf4j.Slf4j;
+import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.StringValue;
+import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SelectItem;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.mapping.BoundSql;
@@ -19,6 +30,7 @@ import org.apache.ibatis.reflection.SystemMetaObject;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.sql.Connection;
+import java.util.List;
 import java.util.Properties;
 
 
@@ -131,7 +143,7 @@ public class SaasSqlInterceptor implements Interceptor {
 		}
 		
 		// 处理pageHelper导致的问题，如com.bruce.jr.invoice.mage.dao.mapper.InvoiceRedToConfirmMapper.listRedInvoiceToConfirm_COUNT
-		if(methodName.contains("_")) {
+		if (methodName.contains("_")) {
 			methodName = methodName.substring(0, methodName.indexOf('_'));
 		}
 		
@@ -184,32 +196,35 @@ public class SaasSqlInterceptor implements Interceptor {
 	 * @param merchantId
 	 * @return
 	 */
-	private String processSelectSql(String sql, String merchantId) {
-		sql = sql.toLowerCase();
-		
-		int selectCount = StringUtils.countMatches(sql, "select");
-		int whereCount  = StringUtils.countMatches(sql, "where");
-		String newSql = sql;
-		//单表的sql查询
-		if (selectCount == 1 && !sql.contains(JOIN)) {
-			if (selectCount == whereCount) {//最外层的sql有where
-				newSql = sql.substring(0, sql.lastIndexOf("where") + 5) + "  " + MERCHANT_ID_FIELD + " = " + quotationField(merchantId) + " and " + sql.substring(sql.lastIndexOf("where") + 5);
-			} else {//最外层的sql没有where 最外层的sql按照 group by 、 order by 、limit这种顺序写sql
-				if (sql.contains("group by")) {
-					newSql = sql.substring(0, sql.lastIndexOf("group by")) + " where " + MERCHANT_ID_FIELD + " = " + quotationField(merchantId) + " " + sql.substring(sql.lastIndexOf("group by"));
-				} else if (!sql.contains("group by") && sql.contains("order by")) {
-					newSql = sql.substring(0, sql.lastIndexOf("order by")) + " where " + MERCHANT_ID_FIELD + " = " + quotationField(merchantId) + " " + sql.substring(sql.lastIndexOf("order by"));
-				} else if (!sql.contains("group by") && !sql.contains("order by") && sql.contains("limit")) {
-					newSql = sql.substring(0, sql.lastIndexOf("limit")) + " where " + MERCHANT_ID_FIELD + " = " + quotationField(merchantId) + " " + sql.substring(sql.lastIndexOf("limit"));
-				}
-				
+	public String processSelectSql(String sql, String merchantId) {
+		try {
+			Statement stmt = null;
+			stmt = CCJSqlParserUtil.parse(sql);
+			Select      select      = (Select) stmt;
+			PlainSelect plainSelect = select.getPlainSelect();
+			
+			List<SelectItem<?>> selectItems          = plainSelect.getSelectItems();
+			SelectItem          selectExpressionItem = new SelectItem();
+			selectExpressionItem.setExpression(new Column(MERCHANT_ID_FIELD));
+			selectItems.add(selectExpressionItem);
+			
+			Expression where    = plainSelect.getWhere();
+			EqualsTo   equalsTo = new EqualsTo();
+			equalsTo.setLeftExpression(new Column(MERCHANT_ID_FIELD));
+			equalsTo.setRightExpression(new StringValue(merchantId));
+			if (where != null) {
+				where = new AndExpression(where, equalsTo);
+			} else {
+				// 没有where子句的情况
+				where = equalsTo;
 			}
-		} else if (sql.contains(JOIN)) {
-			//假如有子查询或者连表查询，原有sql需要做改造处理，查询字段必须查出merchant_id
-			newSql = sql.substring(0, sql.indexOf("from")) + " from (" + sql + ")t where t." + MERCHANT_ID_FIELD + " = " + quotationField(merchantId);
+			plainSelect.setWhere(where);
+			return select.toString();
+		} catch (JSQLParserException e) {
+			e.printStackTrace();
 		}
 		
-		return newSql;
+		return null;
 	}
 	
 	/**
@@ -223,4 +238,5 @@ public class SaasSqlInterceptor implements Interceptor {
 								  .append(merchantId)
 								  .append("\"").toString();
 	}
+	
 }
