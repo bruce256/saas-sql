@@ -78,7 +78,7 @@ public class SaasSqlInterceptor implements Interceptor {
 		String merchantId = MerchantIdContext.getMerchantId();
 		switch (sqlType) {
 			case SELECT:
-				newSql = processSelectSql(sql, newSql, merchantId);
+				newSql = processSelectSql(sql, merchantId);
 				break;
 			case INSERT:
 				newSql = processInsertSql(sql, merchantId);
@@ -181,16 +181,15 @@ public class SaasSqlInterceptor implements Interceptor {
 	 * 获取修改后的select sql
 	 *
 	 * @param sql
-	 * @param newSql
 	 * @param merchantId
 	 * @return
 	 */
-	private String processSelectSql(String sql, String newSql, String merchantId) {
+	private String processSelectSql(String sql, String merchantId) {
 		sql = sql.toLowerCase();
 		
 		int selectCount = StringUtils.countMatches(sql, "select");
 		int whereCount  = StringUtils.countMatches(sql, "where");
-		
+		String newSql = sql;
 		//单表的sql查询
 		if (selectCount == 1 && !sql.contains(JOIN)) {
 			if (selectCount == whereCount) {//最外层的sql有where
